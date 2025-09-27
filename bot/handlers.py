@@ -1,4 +1,4 @@
-# bot/handlers.py - ОБРАБОТКА КНОПКИ "ДОЛГИ"
+# bot/handlers.py - ОБНОВЛЕННАЯ ВЕРСИЯ С АНАЛИТИКОЙ
 
 import logging
 from telegram import Update
@@ -8,9 +8,11 @@ from services.wallet_service import wallet_service
 from services.babylon_service import babylon_service
 from services.transaction_service import transaction_service
 from services.simple_budget_service import simple_budget_service
+from services.debt_service import debt_service
 
-from keyboards.main_menu import get_main_menu_keyboard, get_debt_management_keyboard, remove_keyboard
+from keyboards.main_menu import get_main_menu_keyboard, get_analytics_menu_keyboard, remove_keyboard
 from .common import show_main_menu
+from .analytics_handlers import show_financial_health, show_savings_forecast, show_spending_analysis
 
 logger = logging.getLogger(__name__)
 
@@ -129,6 +131,27 @@ async def show_babylon_rules(update: Update, context: ContextTypes.DEFAULT_TYPE)
         logger.error(f"Rules error: {e}")
         await update.message.reply_text("❌ Ошибка при получении прогресса правил.")
 
+async def show_analytics_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Показывает меню расширенной аналитики"""
+    menu_text = """
+📈 *РАСШИРЕННАЯ АНАЛИТИКА ВАВИЛОНА*
+
+Выберите тип анализа:
+
+🏛️ *Финансовое здоровье* - общая оценка по вавилонским меркам
+🔮 *Прогноз накоплений* - когда достигнете финансовых целей
+📊 *Анализ расходов* - паттерны и возможности для оптимизации
+🎯 *Рекомендации* - персональные советы для улучшения
+
+💡 *Мудрость Вавилона:* «Анализ расходов — первый шаг к богатству»
+"""
+    
+    await update.message.reply_text(
+        menu_text, 
+        parse_mode='Markdown',
+        reply_markup=get_analytics_menu_keyboard()
+    )
+
 async def show_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Простая помощь по вавилонскому боту"""
     help_text = """
@@ -139,19 +162,17 @@ async def show_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
 • Расходы возможны ТОЛЬКО из Бюджета на жизнь (90%)
 • Золотой запас НЕДОСТУПЕН для расходов
 
+*📈 Новые возможности аналитики:*
+• 🏛️ Финансовое здоровье - оценка по вавилонским стандартам
+• 🔮 Прогноз накоплений - планирование финансовых целей  
+• 📊 Анализ расходов - умные инсайты о ваших тратах
+• 🎯 Рекомендации - персональные советы для улучшения
+
 *💡 Быстрые команды:*
 • `10000 зарплата` - добавить доход
 • `1500 еда обед` - добавить расход
 • `-50000 аванс` - доход (отрицательная сумма)
 • `долг Банк 50000` - добавить долг
-
-*📱 Основные функции:*
-• 💳 Добавить доход - с авто-распределением 10%/90%
-• 💸 Добавить расход - только из Бюджета на жизнь  
-• 🏦 Мои кошельки - балансы и прогресс
-• 📊 Статистика - простые вавилонские метрики
-• 🏛️ Правила - прогресс по 7 правилам богатства
-• 📜 Долги - управление долгами и погашение
 
 *💎 Помни:* \"Сначала заплати себе - это основа финансовой свободы\"
 """
@@ -159,8 +180,6 @@ async def show_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def show_debts_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Показывает меню управления долгами при нажатии на кнопку 'Долги'"""
-    from services.debt_service import debt_service
-    
     user_id = update.message.from_user.id
     debts = debt_service.get_active_debts(user_id)
     
@@ -175,6 +194,7 @@ async def show_debts_main_menu(update: Update, context: ContextTypes.DEFAULT_TYP
         menu_text += f"📋 *Количество долгов:* {len(debts)}\n\n"
         menu_text += "💡 *Выберите действие из меню ниже:*"
     
+    from keyboards.main_menu import get_debt_management_keyboard
     await update.message.reply_text(
         menu_text, 
         parse_mode='Markdown',
@@ -193,6 +213,8 @@ async def handle_menu_commands(update: Update, context: ContextTypes.DEFAULT_TYP
         await show_wallets(update, context)
     elif text == '📊 Простая статистика':
         await show_simple_stats(update, context)
+    elif text == '📈 Финансовая аналитика':  # ✅ НОВАЯ КНОПКА
+        await show_analytics_menu(update, context)
     elif text == '🏛️ Правила Вавилона':
         await show_babylon_rules(update, context)
     elif text == '📜 Долги':
@@ -200,15 +222,78 @@ async def handle_menu_commands(update: Update, context: ContextTypes.DEFAULT_TYP
     elif text == 'ℹ️ Помощь':
         await show_help(update, context)
     else:
-        # Пробуем быстрый ввод ТОЛЬКО если это не команда меню долгов
-        if not text.startswith(('📜', '➕', '💳', '📋', '📈', '🎯', '📊', '🏠')):
+        # Пробуем быстрый ввод ТОЛЬКО если это не команда меню
+        if not text.startswith(('📜', '➕', '💳', '📋', '📈', '🎯', '📊', '🏠', '🏛️', '🔮')):
             await quick_input(update, context)
         else:
-            # Если это команда меню долгов, но не обработалась - показываем помощь
+            # Если это команда меню аналитики или долгов, но не обработалась - показываем помощь
             await update.message.reply_text(
                 "❌ Команда не распознана. Используйте кнопки меню.",
                 reply_markup=get_main_menu_keyboard()
             )
+
+async def handle_analytics_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обрабатывает команды меню аналитики"""
+    text = update.message.text
+    
+    if text == '🏛️ Финансовое здоровье':
+        await show_financial_health(update, context)
+    elif text == '🔮 Прогноз накоплений':
+        await show_savings_forecast(update, context)
+    elif text == '📊 Анализ расходов':
+        await show_spending_analysis(update, context)
+    elif text == '🎯 Персональные рекомендации':
+        await show_personal_recommendations(update, context)
+    elif text == '🏠 Главное меню':
+        await show_main_menu(update, context)
+    else:
+        await update.message.reply_text(
+            "❌ Команда аналитики не распознана.",
+            reply_markup=get_analytics_menu_keyboard()
+        )
+
+async def show_personal_recommendations(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Показывает персональные рекомендации"""
+    user_id = update.message.from_user.id
+    
+    try:
+        from services.advanced_analytics import advanced_analytics
+        
+        # Получаем данные БЕЗ рекурсии
+        health_data = advanced_analytics.calculate_financial_health_score(user_id)
+        
+        rec_text = "🎯 *ПЕРСОНАЛЬНЫЕ РЕКОМЕНДАЦИИ ВАВИЛОНА*\n\n"
+        rec_text += f"💎 *Ваш уровень:* {health_data['level']}\n"
+        rec_text += f"📊 *Общий счет:* {health_data['total_score']}/100\n\n"
+        
+        rec_text += "💡 *Рекомендации для улучшения:*\n"
+        for i, recommendation in enumerate(health_data['recommendations'], 1):
+            rec_text += f"{i}. {recommendation}\n"
+        
+        # Дополнительные рекомендации на основе слабых мест
+        if health_data['components']:
+            weakest_component = min(health_data['components'].items(), key=lambda x: x[1])
+            rec_text += f"\n🎯 *Приоритетное улучшение:*\n"
+            
+            if weakest_component[0] == 'rule_10_percent':
+                rec_text += "Сфокусируйтесь на правиле 10%. Начните с малого - откладывайте с каждого дохода."
+            elif weakest_component[0] == 'expense_control':
+                rec_text += "Проанализируйте расходы. Возможно, есть категории где можно сэкономить."
+            elif weakest_component[0] == 'debt_freedom':
+                rec_text += "Разработайте план погашения долгов. Маленькие победы придают сил!"
+            elif weakest_component[0] == 'income_stability':
+                rec_text += "Рассмотрите возможности увеличения доходов или создания дополнительных источников."
+        
+        rec_text += f"\n\n💪 *Совет Вавилона:* «Улучшайте по одному компоненту за раз!»"
+        
+        await update.message.reply_text(rec_text, parse_mode='Markdown')
+        
+    except Exception as e:
+        logger.error(f"Recommendations error: {e}")
+        await update.message.reply_text(
+            "💡 *Совет Вавилона:* Начните с добавления первых доходов и расходов для получения персонализированных рекомендаций.",
+            parse_mode='Markdown'
+        )
 
 def _create_progress_bar(progress: float) -> str:
     """Создает текстовый прогресс-бар"""
