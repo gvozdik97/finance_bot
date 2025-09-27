@@ -1,4 +1,4 @@
-# bot/handlers.py
+# bot/handlers.py - ОБНОВЛЕННЫЕ ОБРАБОТЧИКИ
 
 import logging
 from telegram import Update
@@ -7,18 +7,13 @@ from telegram.ext import ContextTypes
 from services.wallet_service import wallet_service
 from services.babylon_service import babylon_service
 from services.transaction_service import transaction_service
-from services.simple_budget_service import simple_budget_service
 from services.debt_service import debt_service
 
-from keyboards.main_menu import get_main_menu_keyboard, remove_keyboard
-from keyboards.analytics_menu import get_advanced_analytics_menu_keyboard, get_visualizations_menu_keyboard
+from keyboards.main_menu import get_main_menu_keyboard
+from keyboards.analytics_menu import get_analytics_menu_keyboard
 from .common import show_main_menu
-from .analytics_handlers import show_financial_health, show_savings_forecast, show_spending_analysis, show_personal_recommendations
-from .advanced_analytics_handlers import (
-    show_income_trends, show_expense_patterns, show_visualizations_menu,
-    show_financial_pyramid, show_wealth_temple, show_monthly_report,
-    show_river_of_fortune, show_zodiac_chart
-)
+from .analytics_handlers import show_analytics_menu, handle_analytics_commands
+from .conversations import add_income, add_expense, quick_input
 
 logger = logging.getLogger(__name__)
 
@@ -61,52 +56,6 @@ async def show_wallets(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Wallets error: {e}")
         await update.message.reply_text("❌ Ошибка при получении кошельков.")
 
-async def show_simple_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Простая вавилонская статистика"""
-    user_id = update.message.from_user.id
-    
-    try:
-        wallets = wallet_service.get_all_wallets(user_id)
-        transactions = transaction_service.get_transaction_history(user_id, 50)
-        
-        if not transactions:
-            stats_text = "📊 *Простая статистика*\n\nЕще нет данных для анализа."
-            await update.message.reply_text(stats_text, parse_mode='Markdown')
-            return
-        
-        income_total = sum(t[1] for t in transactions if t[0] == 'income')
-        expense_total = sum(t[1] for t in transactions if t[0] == 'expense')
-        gold_reserve_ratio = (wallets['gold_reserve'] / income_total * 100) if income_total > 0 else 0
-        
-        stats_text = f"""
-📊 *Простая Вавилонская Статистика*
-
-*Накопления:*
-💰 Золотой запас: {wallets['gold_reserve']:,.0f} руб.
-📈 Накоплено: {gold_reserve_ratio:.1f}% от доходов
-
-*Общие показатели:*
-✅ Всего доходов: {income_total:,.0f} руб.
-❌ Всего расходов: {expense_total:,.0f} руб.
-💼 Текущий баланс: {sum(wallets.values()):,.0f} руб.
-
-*Последние операции:*
-"""
-        for i, (t_type, amount, category, desc, date) in enumerate(transactions[:5]):
-            emoji = "💳" if t_type == 'income' else "💸"
-            stats_text += f"{emoji} {amount:,.0f} руб. - {category}\n"
-        
-        if gold_reserve_ratio >= 10:
-            stats_text += f"\n🎉 *Отлично!* Вы соблюдаете правило 10%!"
-        else:
-            stats_text += f"\n💡 *Совет:* Стремитесь к 10% накоплений от доходов"
-        
-        await update.message.reply_text(stats_text, parse_mode='Markdown')
-        
-    except Exception as e:
-        logger.error(f"Stats error: {e}")
-        await update.message.reply_text("❌ Ошибка при получении статистики.")
-
 async def show_babylon_rules(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Показывает прогресс по правилам Вавилона"""
     user_id = update.message.from_user.id
@@ -137,29 +86,6 @@ async def show_babylon_rules(update: Update, context: ContextTypes.DEFAULT_TYPE)
         logger.error(f"Rules error: {e}")
         await update.message.reply_text("❌ Ошибка при получении прогресса правил.")
 
-async def show_analytics_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Показывает меню расширенной аналитики"""
-    menu_text = """
-📈 *РАСШИРЕННАЯ АНАЛИТИКА ВАВИЛОНА*
-
-Выберите тип анализа:
-
-🏛️ *Финансовое здоровье* - общая оценка по вавилонским меркам
-🔮 *Прогноз накоплений* - когда достигнете финансовых целей
-📊 *Анализ расходов* - паттерны и возможности для оптимизации
-📈 *Тренды доходов* - анализ динамики и прогнозы
-🎯 *Паттерны расходов* - сезонность и привычки
-🎨 *Визуализации* - графики в стиле древнего Вавилона
-
-💡 *Мудрость Вавилона:* «Изучение трендов - ключ к предсказанию будущего богатства»
-"""
-    
-    await update.message.reply_text(
-        menu_text, 
-        parse_mode='Markdown',
-        reply_markup=get_advanced_analytics_menu_keyboard()
-    )
-
 async def show_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Простая помощь по вавилонскому боту"""
     help_text = """
@@ -170,13 +96,11 @@ async def show_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
 • Расходы возможны ТОЛЬКО из Бюджета на жизнь (90%)
 • Золотой запас НЕДОСТУПЕН для расходов
 
-*📈 Новые возможности аналитики:*
-• 🏛️ Финансовое здоровье - оценка по вавилонским стандартам
-• 🔮 Прогноз накоплений - планирование финансовых целей  
-• 📊 Анализ расходов - умные инсайты о ваших тратах
-• 📈 Тренды доходов - анализ динамики и прогнозы
-• 🎯 Паттерны расходов - сезонность и привычки
-• 🎨 Визуализации - графики в вавилонском стиле
+*📈 Финансовая аналитика:*
+• 📊 Финансовый обзор - ключевые метрики и балансы
+• 📈 Анализ расходов - детализация по категориям
+• 💰 Динамика доходов - тренды и структура доходов
+• 📉 Графики и отчеты - визуализация данных
 
 *💡 Быстрые команды:*
 • `10000 зарплата` - добавить доход
@@ -221,10 +145,8 @@ async def handle_menu_commands(update: Update, context: ContextTypes.DEFAULT_TYP
         return await add_expense(update, context)
     elif text == '🏦 Мои кошельки':
         await show_wallets(update, context)
-    elif text == '📊 Простая статистика':
-        await show_simple_stats(update, context)
-    elif text == '📈 Финансовая аналитика':  # ✅ НОВАЯ КНОПКА
-        await show_analytics_menu(update, context)
+    elif text == '📈 Финансовая аналитика':  # ← ИЗМЕНИЛИ НАЗВАНИЕ
+        await show_analytics_menu(update, context)  # ← ПЕРЕНОСИМ СЮДА
     elif text == '🏛️ Правила Вавилона':
         await show_babylon_rules(update, context)
     elif text == '📜 Долги':
@@ -233,7 +155,7 @@ async def handle_menu_commands(update: Update, context: ContextTypes.DEFAULT_TYP
         await show_help(update, context)
     else:
         # Пробуем быстрый ввод ТОЛЬКО если это не команда меню
-        if not text.startswith(('📜', '➕', '💳', '📋', '📈', '🎯', '📊', '🏠', '🏛️', '🔮')):
+        if not text.startswith(('📜', '➕', '💳', '📋', '📈', '🎯', '📊', '🏠', '🏛️', '🔮', '💰', '📉')):
             await quick_input(update, context)
         else:
             # Если это команда меню аналитики или долгов, но не обработалась - показываем помощь
@@ -242,58 +164,8 @@ async def handle_menu_commands(update: Update, context: ContextTypes.DEFAULT_TYP
                 reply_markup=get_main_menu_keyboard()
             )
 
-async def handle_analytics_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обрабатывает команды меню аналитики"""
-    text = update.message.text
-    
-    if text == '🏛️ Финансовое здоровье':
-        await show_financial_health(update, context)
-    elif text == '🔮 Прогноз накоплений':
-        await show_savings_forecast(update, context)
-    elif text == '📊 Анализ расходов':
-        await show_spending_analysis(update, context)
-    elif text == '📈 Тренды доходов':
-        await show_income_trends(update, context)
-    elif text == '🎯 Паттерны расходов':
-        await show_expense_patterns(update, context)
-    elif text == '🎨 Визуализации':
-        await show_visualizations_menu(update, context)
-    elif text == '🏠 Главное меню':
-        await show_main_menu(update, context)
-    else:
-        await update.message.reply_text(
-            "❌ Команда аналитики не распознана.",
-            reply_markup=get_advanced_analytics_menu_keyboard()
-        )
-
-async def handle_visualizations_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обрабатывает команды меню визуализаций"""
-    text = update.message.text
-    
-    if text == '🏔️ Пирамида стабильности':
-        await show_financial_pyramid(update, context)
-    elif text == '🏛️ Храм богатства':
-        await show_wealth_temple(update, context)
-    elif text == '🌊 Реки удачи':
-        await show_river_of_fortune(update, context)
-    elif text == '✨ Финансовый гороскоп':
-        await show_zodiac_chart(update, context)
-    elif text == '📜 Месячная летопись':
-        await show_monthly_report(update, context)
-    elif text == '🔙 Назад к аналитике':
-        await show_analytics_menu(update, context)
-    elif text == '🏠 Главное меню':
-        await show_main_menu(update, context)
-    else:
-        await update.message.reply_text(
-            "❌ Команда визуализации не распознана.",
-            reply_markup=get_visualizations_menu_keyboard()
-        )
-
 def _create_progress_bar(progress: float) -> str:
     """Создает текстовый прогресс-бар"""
     filled = '█' * int(progress / 10)
     empty = '░' * (10 - int(progress / 10))
     return f"{filled}{empty}"
-
-from .conversations import add_income, add_expense, quick_input

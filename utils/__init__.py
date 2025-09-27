@@ -4,6 +4,7 @@ from .constants import *
 from .categorizers import *
 from .formatters import *
 from .validators import *
+from .financial_charts import financial_charts  # ← НОВЫЙ ИМПОРТ
 
 __all__ = [
     'EXPENSE_CATEGORIES',
@@ -20,5 +21,6 @@ __all__ = [
     'format_percentage',
     'format_transaction_message',
     'validate_amount',
-    'validate_budget_amount'
+    'validate_budget_amount',
+    'financial_charts',  # ← НОВЫЙ
 ]

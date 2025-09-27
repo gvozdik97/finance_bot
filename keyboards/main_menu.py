@@ -1,23 +1,14 @@
-# keyboards/main_menu.py - ОБНОВЛЕННАЯ ВЕРСИЯ С АНАЛИТИКОЙ
+# keyboards/main_menu.py - ОБНОВЛЕННОЕ ГЛАВНОЕ МЕНЮ
 
 from telegram import ReplyKeyboardMarkup, ReplyKeyboardRemove
 
 def get_main_menu_keyboard():
-    """Главное меню с кнопкой аналитики"""
+    """Главное меню с обновленной кнопкой аналитики"""
     keyboard = [
         ['💳 Добавить доход', '💸 Добавить расход'],
-        ['🏦 Мои кошельки', '📊 Простая статистика'],
-        ['📈 Финансовая аналитика', '🏛️ Правила Вавилона'],  # ✅ ДОБАВИЛИ АНАЛИТИКУ
-        ['📜 Долги', 'ℹ️ Помощь']
-    ]
-    return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
-
-def get_analytics_menu_keyboard():
-    """Меню расширенной аналитики"""
-    keyboard = [
-        ['🏛️ Финансовое здоровье', '🔮 Прогноз накоплений'],
-        ['📊 Анализ расходов', '🎯 Персональные рекомендации'],
-        ['🏠 Главное меню']
+        ['🏦 Мои кошельки', '📈 Финансовая аналитика'],  # ← ИЗМЕНИЛИ НАЗВАНИЕ
+        ['🏛️ Правила Вавилона', '📜 Долги'],
+        ['ℹ️ Помощь']
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
