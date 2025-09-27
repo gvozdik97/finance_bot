@@ -1,4 +1,4 @@
-# bot/handlers.py - ОБНОВЛЕННАЯ ВЕРСИЯ С АНАЛИТИКОЙ
+# bot/handlers.py
 
 import logging
 from telegram import Update
@@ -10,9 +10,15 @@ from services.transaction_service import transaction_service
 from services.simple_budget_service import simple_budget_service
 from services.debt_service import debt_service
 
-from keyboards.main_menu import get_main_menu_keyboard, get_analytics_menu_keyboard, remove_keyboard
+from keyboards.main_menu import get_main_menu_keyboard, remove_keyboard
+from keyboards.analytics_menu import get_advanced_analytics_menu_keyboard, get_visualizations_menu_keyboard
 from .common import show_main_menu
-from .analytics_handlers import show_financial_health, show_savings_forecast, show_spending_analysis
+from .analytics_handlers import show_financial_health, show_savings_forecast, show_spending_analysis, show_personal_recommendations
+from .advanced_analytics_handlers import (
+    show_income_trends, show_expense_patterns, show_visualizations_menu,
+    show_financial_pyramid, show_wealth_temple, show_monthly_report,
+    show_river_of_fortune, show_zodiac_chart
+)
 
 logger = logging.getLogger(__name__)
 
@@ -141,15 +147,17 @@ async def show_analytics_menu(update: Update, context: ContextTypes.DEFAULT_TYPE
 🏛️ *Финансовое здоровье* - общая оценка по вавилонским меркам
 🔮 *Прогноз накоплений* - когда достигнете финансовых целей
 📊 *Анализ расходов* - паттерны и возможности для оптимизации
-🎯 *Рекомендации* - персональные советы для улучшения
+📈 *Тренды доходов* - анализ динамики и прогнозы
+🎯 *Паттерны расходов* - сезонность и привычки
+🎨 *Визуализации* - графики в стиле древнего Вавилона
 
-💡 *Мудрость Вавилона:* «Анализ расходов — первый шаг к богатству»
+💡 *Мудрость Вавилона:* «Изучение трендов - ключ к предсказанию будущего богатства»
 """
     
     await update.message.reply_text(
         menu_text, 
         parse_mode='Markdown',
-        reply_markup=get_analytics_menu_keyboard()
+        reply_markup=get_advanced_analytics_menu_keyboard()
     )
 
 async def show_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -166,7 +174,9 @@ async def show_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
 • 🏛️ Финансовое здоровье - оценка по вавилонским стандартам
 • 🔮 Прогноз накоплений - планирование финансовых целей  
 • 📊 Анализ расходов - умные инсайты о ваших тратах
-• 🎯 Рекомендации - персональные советы для улучшения
+• 📈 Тренды доходов - анализ динамики и прогнозы
+• 🎯 Паттерны расходов - сезонность и привычки
+• 🎨 Визуализации - графики в вавилонском стиле
 
 *💡 Быстрые команды:*
 • `10000 зарплата` - добавить доход
@@ -242,57 +252,42 @@ async def handle_analytics_commands(update: Update, context: ContextTypes.DEFAUL
         await show_savings_forecast(update, context)
     elif text == '📊 Анализ расходов':
         await show_spending_analysis(update, context)
-    elif text == '🎯 Персональные рекомендации':
-        await show_personal_recommendations(update, context)
+    elif text == '📈 Тренды доходов':
+        await show_income_trends(update, context)
+    elif text == '🎯 Паттерны расходов':
+        await show_expense_patterns(update, context)
+    elif text == '🎨 Визуализации':
+        await show_visualizations_menu(update, context)
     elif text == '🏠 Главное меню':
         await show_main_menu(update, context)
     else:
         await update.message.reply_text(
             "❌ Команда аналитики не распознана.",
-            reply_markup=get_analytics_menu_keyboard()
+            reply_markup=get_advanced_analytics_menu_keyboard()
         )
 
-async def show_personal_recommendations(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Показывает персональные рекомендации"""
-    user_id = update.message.from_user.id
+async def handle_visualizations_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обрабатывает команды меню визуализаций"""
+    text = update.message.text
     
-    try:
-        from services.advanced_analytics import advanced_analytics
-        
-        # Получаем данные БЕЗ рекурсии
-        health_data = advanced_analytics.calculate_financial_health_score(user_id)
-        
-        rec_text = "🎯 *ПЕРСОНАЛЬНЫЕ РЕКОМЕНДАЦИИ ВАВИЛОНА*\n\n"
-        rec_text += f"💎 *Ваш уровень:* {health_data['level']}\n"
-        rec_text += f"📊 *Общий счет:* {health_data['total_score']}/100\n\n"
-        
-        rec_text += "💡 *Рекомендации для улучшения:*\n"
-        for i, recommendation in enumerate(health_data['recommendations'], 1):
-            rec_text += f"{i}. {recommendation}\n"
-        
-        # Дополнительные рекомендации на основе слабых мест
-        if health_data['components']:
-            weakest_component = min(health_data['components'].items(), key=lambda x: x[1])
-            rec_text += f"\n🎯 *Приоритетное улучшение:*\n"
-            
-            if weakest_component[0] == 'rule_10_percent':
-                rec_text += "Сфокусируйтесь на правиле 10%. Начните с малого - откладывайте с каждого дохода."
-            elif weakest_component[0] == 'expense_control':
-                rec_text += "Проанализируйте расходы. Возможно, есть категории где можно сэкономить."
-            elif weakest_component[0] == 'debt_freedom':
-                rec_text += "Разработайте план погашения долгов. Маленькие победы придают сил!"
-            elif weakest_component[0] == 'income_stability':
-                rec_text += "Рассмотрите возможности увеличения доходов или создания дополнительных источников."
-        
-        rec_text += f"\n\n💪 *Совет Вавилона:* «Улучшайте по одному компоненту за раз!»"
-        
-        await update.message.reply_text(rec_text, parse_mode='Markdown')
-        
-    except Exception as e:
-        logger.error(f"Recommendations error: {e}")
+    if text == '🏔️ Пирамида стабильности':
+        await show_financial_pyramid(update, context)
+    elif text == '🏛️ Храм богатства':
+        await show_wealth_temple(update, context)
+    elif text == '🌊 Реки удачи':
+        await show_river_of_fortune(update, context)
+    elif text == '✨ Финансовый гороскоп':
+        await show_zodiac_chart(update, context)
+    elif text == '📜 Месячная летопись':
+        await show_monthly_report(update, context)
+    elif text == '🔙 Назад к аналитике':
+        await show_analytics_menu(update, context)
+    elif text == '🏠 Главное меню':
+        await show_main_menu(update, context)
+    else:
         await update.message.reply_text(
-            "💡 *Совет Вавилона:* Начните с добавления первых доходов и расходов для получения персонализированных рекомендаций.",
-            parse_mode='Markdown'
+            "❌ Команда визуализации не распознана.",
+            reply_markup=get_visualizations_menu_keyboard()
         )
 
 def _create_progress_bar(progress: float) -> str:
