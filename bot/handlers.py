@@ -1,69 +1,97 @@
-# finance_bot/bot/handlers.py
+# bot/handlers.py - ОБРАБОТКА КНОПКИ "ДОЛГИ"
 
 import logging
 from telegram import Update
 from telegram.ext import ContextTypes
 
-from utils.constants import AMOUNT
-from keyboards.main_menu import get_main_menu_keyboard, remove_keyboard
-from services.budget_service import budget_service
-from services.export_service import export_service
-from services.analytics_service import analytics_service
+from services.wallet_service import wallet_service
+from services.babylon_service import babylon_service
+from services.transaction_service import transaction_service
+from services.simple_budget_service import simple_budget_service
 
-from .common import show_main_menu, show_main_menu_from_query
+from keyboards.main_menu import get_main_menu_keyboard, get_debt_management_keyboard, remove_keyboard
+from .common import show_main_menu
 
 logger = logging.getLogger(__name__)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик команды /start"""
+    """Чистое вавилонское приветствие"""
     user = update.message.from_user
-    welcome_text = f"""
-💰 *Финансовый помощник*
+    
+    wallet_service.init_user_wallets(user.id)
+    babylon_service.init_user_rules(user.id)
+    
+    welcome_text = babylon_service.get_welcome_message()
+    
+    await update.message.reply_text(
+        welcome_text, 
+        parse_mode='Markdown', 
+        reply_markup=get_main_menu_keyboard()
+    )
 
-Привет, {user.first_name}! Выберите действие:
-
-*💸 Добавить расход* - Внести трату
-*💳 Добавить доход* - Внести доход  
-*📊 Отчеты* - Графики и аналитика
-*💰 Бюджеты* - Контроль лимитов
-*📈 Статистика* - Детальный анализ
-*📤 Экспорт* - Выгрузка в Excel
-
-*Быстрый ввод:* "1500 еда обед" или "-50000 зарплата"
-"""
-    await update.message.reply_text(welcome_text, parse_mode='Markdown', 
-                                  reply_markup=get_main_menu_keyboard())
-
-async def show_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Показывает детальную статистику"""
+async def show_wallets(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Показывает вавилонские кошельки"""
     user_id = update.message.from_user.id
     
     try:
-        stats = analytics_service.get_detailed_stats(user_id)
+        wallets = wallet_service.get_all_wallets(user_id)
         
-        if not stats['all_time']['income'] and not stats['all_time']['expense']:
-            await update.message.reply_text("📊 *Статистика*\n\nНет данных для анализа.", parse_mode='Markdown')
+        wallets_text = "🏦 *Ваши Вавилонские Кошельки*\n\n"
+        
+        for wallet_type, balance in wallets.items():
+            display_name = wallet_service.get_wallet_display_name(wallet_type)
+            wallets_text += f"{display_name}: *{balance:,.0f} руб.*\n"
+        
+        if wallets['gold_reserve'] > 0:
+            wallets_text += f"\n💡 *Совет Вавилона:* \"Твой Золотой запас растет! Помни правило 10%\""
+        else:
+            wallets_text += f"\n💡 *Совет Вавилона:* \"Начни с малого - отложи 10% от следующего дохода\""
+        
+        await update.message.reply_text(wallets_text, parse_mode='Markdown')
+        
+    except Exception as e:
+        logger.error(f"Wallets error: {e}")
+        await update.message.reply_text("❌ Ошибка при получении кошельков.")
+
+async def show_simple_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Простая вавилонская статистика"""
+    user_id = update.message.from_user.id
+    
+    try:
+        wallets = wallet_service.get_all_wallets(user_id)
+        transactions = transaction_service.get_transaction_history(user_id, 50)
+        
+        if not transactions:
+            stats_text = "📊 *Простая статистика*\n\nЕще нет данных для анализа."
+            await update.message.reply_text(stats_text, parse_mode='Markdown')
             return
         
+        income_total = sum(t[1] for t in transactions if t[0] == 'income')
+        expense_total = sum(t[1] for t in transactions if t[0] == 'expense')
+        gold_reserve_ratio = (wallets['gold_reserve'] / income_total * 100) if income_total > 0 else 0
+        
         stats_text = f"""
-📈 *Детальная статистика*
+📊 *Простая Вавилонская Статистика*
 
-*Текущий месяц:*
-✅ Доходы: {stats['monthly']['income']:,.0f} руб.
-❌ Расходы: {stats['monthly']['expense']:,.0f} руб.
-💰 Маржа: {stats['monthly']['margin']:,.0f} руб.
+*Накопления:*
+💰 Золотой запас: {wallets['gold_reserve']:,.0f} руб.
+📈 Накоплено: {gold_reserve_ratio:.1f}% от доходов
 
-*За все время:*
-✅ Общие доходы: {stats['all_time']['income']:,.0f} руб.
-❌ Общие расходы: {stats['all_time']['expense']:,.0f} руб.
-💰 Общая маржа: {stats['all_time']['margin']:,.0f} руб.
+*Общие показатели:*
+✅ Всего доходов: {income_total:,.0f} руб.
+❌ Всего расходов: {expense_total:,.0f} руб.
+💼 Текущий баланс: {sum(wallets.values()):,.0f} руб.
 
-*Топ категорий расходов:*
+*Последние операции:*
 """
-        total_expenses = stats['total_expenses']
-        for category, amount in stats['top_expenses'].items():
-            percent = (amount / total_expenses * 100) if total_expenses > 0 else 0
-            stats_text += f"• {category}: {amount:,.0f} руб. ({percent:.1f}%)\n"
+        for i, (t_type, amount, category, desc, date) in enumerate(transactions[:5]):
+            emoji = "💳" if t_type == 'income' else "💸"
+            stats_text += f"{emoji} {amount:,.0f} руб. - {category}\n"
+        
+        if gold_reserve_ratio >= 10:
+            stats_text += f"\n🎉 *Отлично!* Вы соблюдаете правило 10%!"
+        else:
+            stats_text += f"\n💡 *Совет:* Стремитесь к 10% накоплений от доходов"
         
         await update.message.reply_text(stats_text, parse_mode='Markdown')
         
@@ -71,74 +99,121 @@ async def show_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Stats error: {e}")
         await update.message.reply_text("❌ Ошибка при получении статистики.")
 
-async def export_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Экспортирует данные в Excel"""
+async def show_babylon_rules(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Показывает прогресс по правилам Вавилона"""
     user_id = update.message.from_user.id
     
     try:
-        filename = export_service.export_to_excel(user_id)
+        progress = babylon_service.get_user_progress(user_id)
+        rules_info = babylon_service.rules
         
-        if not filename:
-            await update.message.reply_text("❌ Нет данных для экспорта.")
-            return
+        rules_text = "🏛️ *7 Правил Богатства из Вавилона*\n\n"
         
-        await update.message.reply_document(
-            document=open(filename, 'rb'),
-            filename='finance_export.xlsx'
-        )
+        for rule_name, rule_data in rules_info.items():
+            current_progress = progress.get(rule_name, 0)
+            progress_bar = _create_progress_bar(current_progress)
+            
+            rules_text += f"{rule_data['emoji']} *{rule_data['name']}*\n"
+            rules_text += f"{rule_data['description']}\n"
+            rules_text += f"Прогресс: {progress_bar} {current_progress:.0f}%\n\n"
         
-        # Удаляем временный файл
-        export_service.cleanup_file(filename)
+        total_progress = sum(progress.values()) / len(progress) if progress else 0
+        rules_text += f"📊 *Общий прогресс:* {total_progress:.0f}%"
+        
+        quote = babylon_service.get_daily_quote()
+        rules_text += f"\n\n💡 {quote}"
+        
+        await update.message.reply_text(rules_text, parse_mode='Markdown')
         
     except Exception as e:
-        logger.error(f"Export error: {e}")
-        await update.message.reply_text("❌ Ошибка при экспорте данных.")
+        logger.error(f"Rules error: {e}")
+        await update.message.reply_text("❌ Ошибка при получении прогресса правил.")
 
 async def show_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Показывает справку"""
+    """Простая помощь по вавилонскому боту"""
     help_text = """
-ℹ️ *Помощь по боту*
+ℹ️ *Помощь по Вавилонскому Финансовому Боту*
 
-*Основные функции:*
-• 💸 Добавить расход - Внести трату
-• 💳 Добавить доход - Внести доход
-• 📊 Отчеты - Графики и аналитика
-• 💰 Бюджеты - Контроль лимитов
-• 📈 Статистика - Детальный анализ
-• 📤 Экспорт - Выгрузка в Excel
+*🏛️ Основные принципы:*
+• Каждый доход автоматически делится на 10% (Золотой запас) и 90% (Бюджет на жизнь)
+• Расходы возможны ТОЛЬКО из Бюджета на жизнь (90%)
+• Золотой запас НЕДОСТУПЕН для расходов
 
-*Быстрый ввод:*
-Просто отправьте сообщение в формате:
-`1500 еда обед в кафе` - расход
-`-50000 зарплата` - доход (отрицательная сумма)
+*💡 Быстрые команды:*
+• `10000 зарплата` - добавить доход
+• `1500 еда обед` - добавить расход
+• `-50000 аванс` - доход (отрицательная сумма)
+• `долг Банк 50000` - добавить долг
 
-*Категории расходов:*
-🍎 Еда, 🚗 Транспорт, 🎮 Развлечения, 🏠 Коммуналка, 👕 Одежда, 🏥 Здоровье, 📚 Образование
+*📱 Основные функции:*
+• 💳 Добавить доход - с авто-распределением 10%/90%
+• 💸 Добавить расход - только из Бюджета на жизнь  
+• 🏦 Мои кошельки - балансы и прогресс
+• 📊 Статистика - простые вавилонские метрики
+• 🏛️ Правила - прогресс по 7 правилам богатства
+• 📜 Долги - управление долгами и погашение
+
+*💎 Помни:* \"Сначала заплати себе - это основа финансовой свободы\"
 """
     await update.message.reply_text(help_text, parse_mode='Markdown')
 
+async def show_debts_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Показывает меню управления долгами при нажатии на кнопку 'Долги'"""
+    from services.debt_service import debt_service
+    
+    user_id = update.message.from_user.id
+    debts = debt_service.get_active_debts(user_id)
+    
+    menu_text = "🏛️ *Управление Долгами*\n\n"
+    
+    if not debts:
+        menu_text += "🎉 *У вас нет активных долгов!*\n\n"
+        menu_text += "💡 *Мудрость Вавилона:* «Свободный от долгов человек — уже богач!»"
+    else:
+        total_debt = sum(debt.current_amount for debt in debts)
+        menu_text += f"📊 *Общая сумма долгов:* {total_debt:,.0f} руб.\n"
+        menu_text += f"📋 *Количество долгов:* {len(debts)}\n\n"
+        menu_text += "💡 *Выберите действие из меню ниже:*"
+    
+    await update.message.reply_text(
+        menu_text, 
+        parse_mode='Markdown',
+        reply_markup=get_debt_management_keyboard()
+    )
+
 async def handle_menu_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обрабатывает команды из главного меню"""
+    """Обрабатывает команды главного меню"""
     text = update.message.text
     
-    if text == '💸 Добавить расход':
-        return await add_expense(update, context)
-    elif text == '💳 Добавить доход':
+    if text == '💳 Добавить доход':
         return await add_income(update, context)
-    elif text == '📊 Отчеты и аналитика':
-        await show_reports(update, context)
-    elif text == '💰 Бюджеты':
-        await show_budgets_menu(update, context)
-    elif text == '📈 Статистика':
-        await show_stats(update, context)
-    elif text == '📤 Экспорт данных':
-        await export_data(update, context)
+    elif text == '💸 Добавить расход':
+        return await add_expense(update, context)
+    elif text == '🏦 Мои кошельки':
+        await show_wallets(update, context)
+    elif text == '📊 Простая статистика':
+        await show_simple_stats(update, context)
+    elif text == '🏛️ Правила Вавилона':
+        await show_babylon_rules(update, context)
+    elif text == '📜 Долги':
+        await show_debts_main_menu(update, context)
     elif text == 'ℹ️ Помощь':
         await show_help(update, context)
     else:
-        await quick_input(update, context)
+        # Пробуем быстрый ввод ТОЛЬКО если это не команда меню долгов
+        if not text.startswith(('📜', '➕', '💳', '📋', '📈', '🎯', '📊', '🏠')):
+            await quick_input(update, context)
+        else:
+            # Если это команда меню долгов, но не обработалась - показываем помощь
+            await update.message.reply_text(
+                "❌ Команда не распознана. Используйте кнопки меню.",
+                reply_markup=get_main_menu_keyboard()
+            )
 
-# Импортируем функции после их определения
-from .reports_handlers import show_reports
-from .budgets_handlers import show_budgets_menu
-from .conversations import add_expense, add_income, quick_input
+def _create_progress_bar(progress: float) -> str:
+    """Создает текстовый прогресс-бар"""
+    filled = '█' * int(progress / 10)
+    empty = '░' * (10 - int(progress / 10))
+    return f"{filled}{empty}"
+
+from .conversations import add_income, add_expense, quick_input

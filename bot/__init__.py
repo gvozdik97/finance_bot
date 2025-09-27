@@ -1,30 +1,60 @@
-# finance_bot/bot/__init__.py
+# bot/__init__.py - ЧИСТАЯ ВАВИЛОНСКАЯ АРХИТЕКТУРА
+
+"""
+Вавилонский финансовый бот - чистый модуль обработчиков
+Только правила 10%/90%, никакой старой логики
+"""
 
 from .common import show_main_menu, show_main_menu_from_query
-from .handlers import *
-from .conversations import *
-from .reports_handlers import *
-from .budgets_handlers import *
 
+# Основные обработчики
+from .handlers import (
+    start,
+    show_wallets,
+    show_simple_stats,
+    show_babylon_rules,
+    show_help,
+    handle_menu_commands
+)
+
+# Обработчики транзакций и диалогов
+from .conversations import (
+    add_income,
+    add_expense,
+    amount_handler,
+    category_handler,
+    save_transaction,
+    quick_input,
+    create_transaction_conversation_handler
+)
+
+# Упрощенный список экспортируемых функций
 __all__ = [
+    # Common functions
     'show_main_menu',
     'show_main_menu_from_query',
+    
+    # Main handlers
     'start',
-    'show_stats',
-    'export_data',
+    'show_wallets', 
+    'show_simple_stats',
+    'show_babylon_rules',
     'show_help',
     'handle_menu_commands',
-    'add_expense',
+    
+    # Transaction handlers
     'add_income',
+    'add_expense',
     'amount_handler',
     'category_handler',
     'save_transaction',
     'quick_input',
-    'show_reports',
-    'report_handler',
-    'show_budgets_menu',
-    'budget_handler',
-    'create_transaction_conversation_handler',
-    'create_budget_conversation_handler',
-    'create_edit_budget_conversation_handler'
+    
+    # Conversation handlers
+    'create_transaction_conversation_handler'
 ]
+
+# Убрали все старые импорты:
+# - reports_handlers (удалили)
+# - budgets_handlers (удалили) 
+# - сложные обработчики бюджетов (упростили)

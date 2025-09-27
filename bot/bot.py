@@ -1,32 +1,19 @@
-# finance_bot/bot/bot.py
+# bot/bot.py - ИСПРАВЛЕННЫЙ ПОРЯДОК ОБРАБОТЧИКОВ
 
 import os
 import logging
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackQueryHandler
+from telegram.ext import Application, CommandHandler, MessageHandler, filters
 
-from .handlers import start, show_stats, export_data, show_help, handle_menu_commands
-from .conversations import (
-    create_transaction_conversation_handler,
-    create_budget_conversation_handler,
-    create_edit_budget_conversation_handler,
-    quick_input
-)
-from .reports_handlers import report_handler
-from .budgets_handlers import (
-    budget_handler, 
-    delete_budget_handler, 
-    overwrite_budget_handler,
-    budget_category_handler
-)
+from .handlers import start, handle_menu_commands
+from .conversations import create_transaction_conversation_handler
+from .debt_conversations import create_debt_conversation_handler
+from .debt_handlers import create_debt_payment_conversation_handler
+from .debt_menu_handlers import handle_debt_menu_commands
 
-# Настройка логирования
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
+logger = logging.getLogger(__name__)
 
 def setup_bot():
-    """Настраивает и возвращает бота"""
+    """Настраивает бота с правильным порядком обработчиков"""
     BOT_TOKEN = os.getenv('BOT_TOKEN')
     
     if not BOT_TOKEN:
@@ -34,27 +21,44 @@ def setup_bot():
     
     application = Application.builder().token(BOT_TOKEN).build()
     
-    # Регистрация обработчиков
+    # 📍 ВАЖНО: Порядок обработчиков имеет значение!
+    # Более специфичные обработчики должны быть ВЫШЕ
+    
+    # 1. Команда /start (самая специфичная)
     application.add_handler(CommandHandler("start", start))
     
-    # Conversation Handlers
+    # 2. Conversation Handlers (очень специфичные)
     application.add_handler(create_transaction_conversation_handler())
-    application.add_handler(create_budget_conversation_handler())
-    application.add_handler(create_edit_budget_conversation_handler())
+    application.add_handler(create_debt_conversation_handler())
+    application.add_handler(create_debt_payment_conversation_handler())
     
-    # Обработчики кнопок
-    application.add_handler(CallbackQueryHandler(report_handler, pattern='^report_'))
-    application.add_handler(CallbackQueryHandler(budget_handler, pattern='^budget_'))
-    application.add_handler(CallbackQueryHandler(delete_budget_handler, pattern='^(delete_budget_|cancel_delete)'))
-    application.add_handler(CallbackQueryHandler(overwrite_budget_handler, pattern='^(overwrite_budget_|cancel_overwrite)'))
+    # 3. Обработчик меню долгов (специфичные команды)
+    debt_commands_pattern = r'^(📜 Мои долги|➕ Добавить долг|💳 Погасить долг|📋 План погашения|📈 Прогресс свободы|🎯 Вехи освобождения|📊 Статистика долгов|🏠 Главное меню)$'
+    application.add_handler(MessageHandler(
+        filters.Regex(debt_commands_pattern), 
+        handle_debt_menu_commands
+    ))
     
-    # Обработчик текстовых сообщений (главное меню и быстрый ввод)
+    # 4. Обработчик быстрого ввода долгов (менее специфичный)
+    application.add_handler(MessageHandler(
+        filters.Regex(r'^долг .*'), 
+        handle_debt_menu_commands
+    ))
+    
+    # 5. Обработчик главного меню (самый общий - ДОЛЖЕН БЫТЬ ПОСЛЕДНИМ)
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_menu_commands))
     
+    logger.info("✅ Бот настроен с правильным порядком обработчиков")
     return application
 
 def run_bot():
     """Запускает бота"""
-    application = setup_bot()
-    print("Бот запущен...")
-    application.run_polling()
+    try:
+        application = setup_bot()
+        print("🏛️ Вавилонский финансовый бот запущен")
+        print("🔧 Исправлен порядок обработчиков")
+        application.run_polling()
+        
+    except Exception as e:
+        logger.error(f"❌ Ошибка запуска: {e}")
+        print(f"❌ Ошибка: {e}")

@@ -1,49 +1,59 @@
-# finance_bot/bot/conversations.py
+# bot/conversations.py - ИСПРАВЛЕННАЯ ВЕРСИЯ
 
 import logging
 from telegram import Update
-from telegram.ext import ContextTypes, ConversationHandler, CommandHandler, MessageHandler, filters, CallbackQueryHandler
+from telegram.ext import ContextTypes, ConversationHandler, CommandHandler, MessageHandler, filters
 
-from utils.constants import AMOUNT, CATEGORY, DESCRIPTION, BUDGET_AMOUNT, EDIT_BUDGET_AMOUNT
-from utils.validators import validate_amount, validate_budget_amount
+from utils.constants import AMOUNT, CATEGORY, DESCRIPTION
+from utils.validators import validate_amount
 from utils.categorizers import clean_category_name, categorize_expense, categorize_income
-from utils.formatters import format_transaction_message
 
 from services.transaction_service import transaction_service
-from services.budget_service import budget_service
+from services.simple_budget_service import simple_budget_service
+from services.babylon_service import babylon_service
+from services.wallet_service import wallet_service  # ✅ ДОБАВИЛИ ИМПОРТ
 
 from keyboards.main_menu import get_main_menu_keyboard, get_category_keyboard, remove_keyboard
 
-from .common import show_main_menu, show_main_menu_from_query
+from .common import show_main_menu
 
 logger = logging.getLogger(__name__)
 
 # ============================================================================
-# ОБРАБОТЧИКИ ДЛЯ ДОБАВЛЕНИЯ ТРАНЗАКЦИЙ
+# ЧИСТАЯ ВАВИЛОНСКАЯ ЛОГИКА ТРАНЗАКЦИЙ - ИСПРАВЛЕННАЯ
 # ============================================================================
 
-async def add_expense(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Начинает процесс добавления расхода"""
-    await update.message.reply_text(
-        "💸 *Добавление расхода*\n\nВведите сумму:",
-        parse_mode='Markdown',
-        reply_markup=remove_keyboard()
-    )
-    context.user_data['type'] = 'expense'
-    return AMOUNT
-
 async def add_income(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Начинает процесс добавления дохода"""
+    """Чистое вавилонское добавление дохода"""
     await update.message.reply_text(
-        "💳 *Добавление дохода*\n\nВведите сумму:",
+        "💳 *Добавление дохода*\n\n"
+        "🏛️ *По правилам Вавилона:*\n"
+        "• 10% → 💰 Золотой запас (накопления)\n"  
+        "• 90% → 💼 Бюджет на жизнь (расходы)\n\n"
+        "Введите сумму дохода:",
         parse_mode='Markdown', 
         reply_markup=remove_keyboard()
     )
     context.user_data['type'] = 'income'
     return AMOUNT
 
+async def add_expense(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Чистое вавилонское добавление расхода - ИСПРАВЛЕНО"""
+    user_id = update.message.from_user.id
+    living_budget = wallet_service.get_wallet_balance(user_id, 'living_budget')  # ✅ ИСПРАВИЛИ
+    
+    await update.message.reply_text(
+        f"💸 *Добавление расхода*\n\n"
+        f"💼 *Доступно в Бюджете на жизнь:* {living_budget:,.0f} руб.\n\n"
+        f"Введите сумму расхода:",
+        parse_mode='Markdown',
+        reply_markup=remove_keyboard()
+    )
+    context.user_data['type'] = 'expense'
+    return AMOUNT
+
 async def amount_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обрабатывает ввод суммы"""
+    """Обрабатывает ввод суммы с чистой вавилонской логикой - ИСПРАВЛЕНО"""
     is_valid, result = validate_amount(update.message.text)
     
     if not is_valid:
@@ -51,7 +61,25 @@ async def amount_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return AMOUNT
     
     amount = result
+    user_id = update.message.from_user.id
     context.user_data['amount'] = amount
+    
+    # ВАВИЛОНСКАЯ ПРОВЕРКА: расходы только из 90%
+    if context.user_data['type'] == 'expense':
+        affordability = wallet_service.can_afford_expense(user_id, amount)  # ✅ ИСПРАВИЛИ
+        
+        if not affordability['can_afford']:
+            await update.message.reply_text(
+                f"🚫 *Недостаточно средств в Бюджете на жизнь!*\n\n"
+                f"💼 Доступно: {affordability['available']:,.0f} руб.\n"
+                f"💸 Нужно: {affordability['needed']:,.0f} руб.\n"
+                f"📉 Не хватает: {affordability['shortfall']:,.0f} руб.\n\n"
+                f"💡 *Мудрость Вавилона:* \"Контролируй расходы в рамках 90%\"",
+                parse_mode='Markdown'
+            )
+            await show_main_menu(update, context)
+            context.user_data.clear()
+            return ConversationHandler.END
     
     # Выбор категории
     transaction_type = context.user_data['type']
@@ -79,34 +107,47 @@ async def skip_description(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return await save_transaction(update, context, description="Без описания")
 
 async def save_transaction(update: Update, context: ContextTypes.DEFAULT_TYPE, description: str = None):
-    """Сохраняет транзакцию в базу данных"""
+    """Сохраняет транзакцию с чистой вавилонской логикой"""
     user_data = context.user_data
     
     if description is None:
         description = update.message.text if update.message and update.message.text != '/skip' else "Без описания"
     
     user_id = update.message.from_user.id
-    success = transaction_service.add_transaction(
-        user_id=user_id,
-        transaction_type=user_data['type'],
-        amount=user_data['amount'],
-        category=user_data['category'],
-        description=description
-    )
+    amount = user_data['amount']
+    category = user_data['category']
+    transaction_type = user_data['type']
     
-    if success:
-        message_text = format_transaction_message(
-            user_data['type'], 
-            user_data['amount'], 
-            user_data['category'], 
-            description
-        )
-        await update.message.reply_text(message_text, parse_mode='Markdown')
+    try:
+        if transaction_type == 'income':
+            # ЧИСТОЕ ВАВИЛОНСКОЕ РАСПРЕДЕЛЕНИЕ
+            result = transaction_service.add_income(user_id, amount, category, description)
+            
+            if result['success']:
+                # Обновляем прогресс правила 10%
+                babylon_service.update_rule_progress(user_id, '10_percent_rule', 100.0)
+                
+                await update.message.reply_text(result['message'], parse_mode='Markdown')
+            else:
+                await update.message.reply_text(f"❌ {result['error']}")
+                
+        else:  # expense
+            # ЧИСТАЯ ВАВИЛОНСКАЯ ПРОВЕРКА
+            result = transaction_service.add_expense(user_id, amount, category, description)
+            
+            if result['success']:
+                # Обновляем прогресс контроля расходов
+                await update_expense_progress(user_id)
+                
+                # Проверка бюджетного лимита
+                await check_budget_limit(update, user_id, category, amount)
+                
+                await update.message.reply_text(result['message'], parse_mode='Markdown')
+            else:
+                await update.message.reply_text(f"❌ {result['error']}")
         
-        # Проверка бюджета для расходов
-        if user_data['type'] == 'expense':
-            await check_budget(update, context, user_data['category'], user_data['amount'])
-    else:
+    except Exception as e:
+        logger.error(f"Transaction save error: {e}")
         await update.message.reply_text("❌ Ошибка при сохранении транзакции.")
     
     # Возврат в главное меню
@@ -114,273 +155,139 @@ async def save_transaction(update: Update, context: ContextTypes.DEFAULT_TYPE, d
     context.user_data.clear()
     return ConversationHandler.END
 
-async def check_budget(update: Update, context: ContextTypes.DEFAULT_TYPE, category: str, amount: float):
-    """Проверяет превышение бюджета"""
-    user_id = update.message.from_user.id
-    budget_check = budget_service.check_budget_exceeded(user_id, category, amount)
+async def update_expense_progress(user_id: int):
+    """Обновляет прогресс контроля расходов"""
+    living_budget = wallet_service.get_wallet_balance(user_id, 'living_budget')  # ✅ ИСПРАВИЛИ
+    gold_reserve = wallet_service.get_wallet_balance(user_id, 'gold_reserve')    # ✅ ИСПРАВИЛИ
+    total_balance = living_budget + gold_reserve
     
-    if budget_check['exceeded']:
+    if total_balance > 0:
+        # Идеал: living_budget составляет 90% от общего баланса
+        ideal_ratio = 90.0
+        current_ratio = (living_budget / total_balance * 100) if total_balance > 0 else 0
+        progress = min(100.0, (current_ratio / ideal_ratio * 100))
+        
+        babylon_service.update_rule_progress(user_id, 'control_expenses', progress)
+
+async def check_budget_limit(update: Update, user_id: int, category: str, amount: float):
+    """Проверяет лимит категории с вавилонским акцентом"""
+    budget_check = simple_budget_service.check_spending(user_id, category, amount)
+    
+    if budget_check.get('has_limit') and budget_check['exceeded']:
         await update.message.reply_text(
-            f"⚠️ *Превышение бюджета!*\n"
+            f"⚠️ *Превышение бюджетного лимита!*\n\n"
             f"Категория: {category}\n"
-            f"Лимит: {budget_check['budget_amount']:,.0f} руб.\n"
-            f"Будет потрачено: {budget_check['total_after_transaction']:.0f} руб.\n"
-            f"Превышение: {budget_check['overspend']:.0f} руб.",
+            f"Лимит в месяц: {budget_check['monthly_limit']:,.0f} руб.\n"
+            f"Уже потрачено: {budget_check['current_spent']:,.0f} руб.\n"
+            f"После траты: {budget_check['total_after_expense']:,.0f} руб.\n"
+            f"📛 Превышение: {budget_check['overspend']:,.0f} руб.\n\n"
+            f"💡 *Совет Вавилона:* \"Мудрый человек знает меру в расходах\"",
             parse_mode='Markdown'
         )
 
 # ============================================================================
-# ОБРАБОТЧИКИ ДЛЯ БЮДЖЕТОВ
-# ============================================================================
-
-async def budget_amount_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обрабатывает ввод суммы бюджета"""
-    is_valid, result = validate_budget_amount(update.message.text)
-    
-    if not is_valid:
-        await update.message.reply_text(result)
-        return BUDGET_AMOUNT
-    
-    amount = result
-    user_id = update.message.from_user.id
-    category = context.user_data['budget_category']
-    
-    # Проверяем существующий бюджет
-    existing_budget = budget_service.get_budget(user_id, category)
-    
-    if existing_budget:
-        # Предлагаем выбор: перезаписать или отменить
-        from keyboards.budgets_menu import get_overwrite_budget_keyboard
-        await update.message.reply_text(
-            f"⚠️ Бюджет для категории '{category}' уже установлен!\n"
-            f"• Текущий лимит: {existing_budget.amount} руб.\n"
-            f"• Новый лимит: {amount} руб.\n\n"
-            f"Хотите перезаписать существующий бюджет?",
-            reply_markup=get_overwrite_budget_keyboard(amount)
-        )
-        
-        # Сохраняем данные для возможной перезаписи
-        context.user_data['pending_budget'] = {
-            'category': category,
-            'amount': amount
-        }
-        
-        return ConversationHandler.END
-    
-    # Если бюджета нет - добавляем новый
-    success = budget_service.add_budget(user_id, category, amount, 'monthly')
-    
-    if success:
-        await update.message.reply_text(
-            f"✅ Бюджет установлен!\n"
-            f"• Категория: {category}\n"
-            f"• Лимит: {amount} руб./месяц"
-        )
-    else:
-        await update.message.reply_text("❌ Ошибка при установке бюджета.")
-    
-    await show_main_menu(update, context)
-    context.user_data.clear()
-    return ConversationHandler.END
-
-async def edit_budget_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обрабатывает начало изменения бюджета"""
-    query = update.callback_query
-    await query.answer()
-    
-    if query.data == "cancel_edit":
-        await query.message.reply_text("❌ Изменение бюджета отменено.")
-        return ConversationHandler.END
-    
-    category = query.data.replace('edit_budget_', '')
-    
-    # Получаем текущий бюджет
-    user_id = query.from_user.id
-    budget = budget_service.get_budget(user_id, category)
-    
-    if not budget:
-        await query.message.reply_text("❌ Бюджет не найден.")
-        return ConversationHandler.END
-    
-    # Сохраняем данные в context
-    context.user_data['edit_budget'] = {
-        'category': category,
-        'current_amount': budget.amount
-    }
-    
-    await query.message.reply_text(
-        f"✏️ *Изменение бюджета*\n\n"
-        f"Категория: {category}\n"
-        f"Текущий лимит: {budget.amount} руб.\n\n"
-        f"Введите новый лимит в рублях:",
-        parse_mode='Markdown',
-        reply_markup=remove_keyboard()
-    )
-    
-    return EDIT_BUDGET_AMOUNT
-
-async def edit_budget_amount_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обрабатывает ввод новой суммы бюджета"""
-    is_valid, result = validate_budget_amount(update.message.text)
-    
-    if not is_valid:
-        await update.message.reply_text(result)
-        return EDIT_BUDGET_AMOUNT
-    
-    new_amount = result
-    user_data = context.user_data.get('edit_budget', {})
-    category = user_data.get('category')
-    current_amount = user_data.get('current_amount')
-    
-    if not category:
-        await update.message.reply_text("❌ Ошибка: категория не найдена.")
-        context.user_data.clear()
-        return ConversationHandler.END
-    
-    user_id = update.message.from_user.id
-    
-    # Обновляем бюджет
-    success = budget_service.update_budget(user_id, category, new_amount)
-    
-    if success:
-        await update.message.reply_text(
-            f"✅ Бюджет обновлен!\n\n"
-            f"• Категория: {category}\n"
-            f"• Старый лимит: {current_amount} руб.\n"
-            f"• Новый лимит: {new_amount} руб.\n"
-            f"• Изменение: {new_amount - current_amount:+.0f} руб."
-        )
-    else:
-        await update.message.reply_text("❌ Ошибка при обновлении бюджета.")
-    
-    await show_main_menu(update, context)
-    context.user_data.clear()
-    return ConversationHandler.END
-
-async def cancel_edit_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обрабатывает отмену изменения бюджета"""
-    query = update.callback_query
-    await query.answer()
-    await query.message.reply_text("❌ Изменение бюджета отменено.")
-    context.user_data.clear()
-    return ConversationHandler.END
-
-async def cancel_edit_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обрабатывает команду отмены изменения бюджета"""
-    await update.message.reply_text("❌ Изменение бюджета отменено.")
-    context.user_data.clear()
-    return ConversationHandler.END
-
-# ============================================================================
-# БЫСТРЫЙ ВВОД
+# БЫСТРЫЙ ВВОД - ЧИСТАЯ ВАВИЛОНСКАЯ ЛОГИКА
 # ============================================================================
 
 async def quick_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обрабатывает быстрый ввод транзакций"""
-    text = update.message.text
+    """Быстрый ввод с чистой вавилонской логикой"""
+    text = update.message.text.strip()
     words = text.split()
     
+    if len(words) < 2:
+        await update.message.reply_text(
+            "❌ *Формат быстрого ввода:*\n"
+            "`1500 еда обед` - расход\n" 
+            "`-50000 зарплата` - доход",
+            parse_mode='Markdown'
+        )
+        return
+    
     try:
-        if len(words) >= 2:
-            amount = float(words[0])
-            category_word = words[1].lower()
-            description = ' '.join(words[2:]) if len(words) > 2 else "Быстрый ввод"
+        amount = float(words[0])
+        category_word = words[1].lower()
+        description = ' '.join(words[2:]) if len(words) > 2 else "Быстрый ввод"
+        
+        user_id = update.message.from_user.id
+        
+        if amount < 0:  # Отрицательная сумма = доход
+            amount = abs(amount)
+            category = categorize_income(category_word)
+            result = transaction_service.add_income(user_id, amount, category, description)
             
-            # Определяем тип и категорию
-            if amount < 0:
-                transaction_type = 'income'
-                amount = abs(amount)
-                category = categorize_income(category_word)
+            if result['success']:
+                babylon_service.update_rule_progress(user_id, '10_percent_rule', 100.0)
+                message = result['message']
             else:
-                transaction_type = 'expense'
-                category = categorize_expense(category_word)
-            
-            # Сохраняем транзакцию
-            user_id = update.message.from_user.id
-            success = transaction_service.add_transaction(
-                user_id=user_id,
-                transaction_type=transaction_type,
-                amount=amount,
-                category=category,
-                description=description
-            )
-            
-            if success:
-                # Проверка бюджета для расходов
-                if transaction_type == 'expense':
-                    budget_check = budget_service.check_budget_exceeded(user_id, category, amount)
-                    if budget_check['exceeded']:
-                        await update.message.reply_text(
-                            f"⚠️ *Превышение бюджета!*\n"
-                            f"Категория: {category}\n"
-                            f"Лимит: {budget_check['budget_amount']:,.0f} руб.\n"
-                            f"Превышение: {budget_check['overspend']:.0f} руб.",
-                            parse_mode='Markdown'
-                        )
+                message = f"❌ {result['error']}"
                 
-                type_text = "Доход" if transaction_type == 'income' else "Расход"
-                emoji = "💳" if transaction_type == 'income' else "💸"
-                
+        else:  # Положительная сумма = расход
+            category = categorize_expense(category_word)
+            
+            # ✅ ДОБАВИЛИ ПРОВЕРКУ ДОСТУПНОСТИ СРЕДСТВ
+            affordability = wallet_service.can_afford_expense(user_id, amount)
+            if not affordability['can_afford']:
                 await update.message.reply_text(
-                    f"{emoji} *{type_text} добавлен!*\n\n"
-                    f"• Сумма: {amount} руб.\n"
-                    f"• Категория: {category}\n"
-                    f"• Описание: {description}",
+                    f"🚫 *Недостаточно средств в Бюджете на жизнь!*\n"
+                    f"Доступно: {affordability['available']:,.0f} руб.\n"
+                    f"Нужно: {affordability['needed']:,.0f} руб.",
                     parse_mode='Markdown'
                 )
-            else:
-                await update.message.reply_text("❌ Ошибка при сохранении транзакции.")
+                return
+            
+            result = transaction_service.add_expense(user_id, amount, category, description)
+            
+            if result['success']:
+                await update_expense_progress(user_id)
+                budget_check = simple_budget_service.check_spending(user_id, category, amount)
                 
+                if budget_check.get('has_limit') and budget_check['exceeded']:
+                    message = f"{result['message']}\n\n⚠️ *Превышен бюджет категории!*"
+                else:
+                    message = result['message']
+            else:
+                message = f"❌ {result['error']}"
+        
+        await update.message.reply_text(message, parse_mode='Markdown')
+        
     except ValueError:
-        await update.message.reply_text("❌ Формат: сумма категория [описание]")
+        await update.message.reply_text(
+            "❌ *Ошибка формата!*\n"
+            "Примеры:\n"
+            "• `10000 зарплата` - доход 10000 руб.\n"
+            "• `1500 еда обед` - расход 1500 руб. на еду",
+            parse_mode='Markdown'
+        )
+    except Exception as e:
+        logger.error(f"Quick input error: {e}")
+        await update.message.reply_text("❌ Ошибка при быстром вводе.")
 
 # ============================================================================
-# СОЗДАНИЕ CONVERSATION HANDLERS
+# CONVERSATION HANDLERS - УПРОЩЕННЫЕ
 # ============================================================================
 
 def create_transaction_conversation_handler():
-    """Создает ConversationHandler для добавления транзакций"""
+    """Создает упрощенный обработчик диалогов"""
     return ConversationHandler(
         entry_points=[
-            MessageHandler(filters.Regex('^(💸 Добавить расход|💳 Добавить доход)$'), 
-                          lambda update, context: handle_transaction_start(update, context))
+            MessageHandler(filters.Regex('^(💳 Добавить доход|💸 Добавить расход)$'), 
+                          handle_transaction_start)
         ],
         states={
             AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, amount_handler)],
             CATEGORY: [MessageHandler(filters.TEXT & ~filters.COMMAND, category_handler)],
             DESCRIPTION: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, 
-                             lambda update, context: save_transaction(update, context)),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, save_transaction),
                 CommandHandler('skip', skip_description)
             ]
         },
-        fallbacks=[],
+        fallbacks=[CommandHandler('cancel', cancel_conversation)],
+        allow_reentry=True
     )
 
-def create_budget_conversation_handler():
-    """Создает ConversationHandler для добавления бюджетов"""
-    from .budgets_handlers import budget_category_handler
-    
-    return ConversationHandler(
-        entry_points=[CallbackQueryHandler(budget_category_handler, pattern='^budget_cat_')],
-        states={
-            BUDGET_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, budget_amount_handler)]
-        },
-        fallbacks=[],
-    )
-
-def create_edit_budget_conversation_handler():
-    """Создает ConversationHandler для изменения бюджетов"""
-    return ConversationHandler(
-        entry_points=[CallbackQueryHandler(edit_budget_handler, pattern='^edit_budget_')],
-        states={
-            EDIT_BUDGET_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, edit_budget_amount_handler)]
-        },
-        fallbacks=[
-            CallbackQueryHandler(cancel_edit_handler, pattern='^cancel_edit'),
-            CommandHandler('cancel', cancel_edit_command)
-        ],
-    )
+# ============================================================================
+# ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
+# ============================================================================
 
 async def handle_transaction_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обрабатывает начало диалога добавления транзакции"""
@@ -389,3 +296,18 @@ async def handle_transaction_start(update: Update, context: ContextTypes.DEFAULT
         return await add_expense(update, context)
     elif text == '💳 Добавить доход':
         return await add_income(update, context)
+
+async def cancel_conversation(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Отменяет текущий диалог"""
+    await update.message.reply_text(
+        "❌ Операция отменена.",
+        reply_markup=get_main_menu_keyboard()
+    )
+    context.user_data.clear()
+    return ConversationHandler.END
+
+# Экспорт функций
+__all__ = [
+    'add_income', 'add_expense', 'amount_handler', 'category_handler', 
+    'save_transaction', 'quick_input', 'create_transaction_conversation_handler'
+]

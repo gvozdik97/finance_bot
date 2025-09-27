@@ -1,95 +1,117 @@
-# finance_bot/services/transaction_service.py
+# services/transaction_service.py - ПОЛНАЯ ПЕРЕПИСЬ
 
-import sqlite3
-from datetime import datetime, timedelta
-from typing import List, Tuple, Optional
+import logging
+from typing import Dict
 from database.connection import db_connection
-from database.models import Transaction
+from services.wallet_service import wallet_service
+
+logger = logging.getLogger(__name__)
 
 class TransactionService:
+    """
+    Чистый вавилонский сервис транзакций.
+    Только правила 10%/90%, никакого общего учета.
+    """
+    
     def __init__(self):
         self.conn = db_connection
     
-    def add_transaction(self, user_id: int, transaction_type: str, amount: float, 
-                       category: str, description: str = "Без описания") -> bool:
-        """Добавляет новую транзакцию"""
+    def add_income(self, user_id: int, amount: float, category: str, description: str = "") -> Dict:
+        """
+        Добавляет доход с АВТОМАТИЧЕСКИМ распределением 10%/90%
+        """
         try:
-            conn = self.conn.get_connection()
-            cursor = conn.cursor()
-            cursor.execute('''
-                INSERT INTO transactions (user_id, type, amount, category, description)
-                VALUES (?, ?, ?, ?, ?)
-            ''', (user_id, transaction_type, amount, category, description))
-            conn.commit()
-            conn.close()
-            return True
+            # ВАВИЛОНСКОЕ ПРАВИЛО: распределение 10%/90%
+            distribution = wallet_service.distribute_income(user_id, amount)
+            
+            if not distribution['success']:
+                return distribution
+            
+            # Сохраняем запись о доходе (для истории)
+            self._save_transaction(user_id, 'income', amount, category, description)
+            
+            return {
+                'success': True,
+                'message': distribution['message'],
+                'distribution': {
+                    'gold_reserve': distribution['gold_reserve'],
+                    'living_budget': distribution['living_budget']
+                }
+            }
+            
         except Exception as e:
-            print(f"Error adding transaction: {e}")
-            return False
+            logger.error(f"Income error for user {user_id}: {e}")
+            return {'success': False, 'error': 'Ошибка при добавлении дохода'}
     
-    def get_user_transactions(self, user_id: int, days: Optional[int] = None, 
-                            start_date: Optional[datetime] = None, 
-                            end_date: Optional[datetime] = None) -> List[Transaction]:
-        """Получает транзакции пользователя за период"""
+    def add_expense(self, user_id: int, amount: float, category: str, description: str = "") -> Dict:
+        """
+        Добавляет расход ТОЛЬКО из Бюджета на жизнь (90%)
+        """
+        try:
+            # ВАВИЛОНСКОЕ ПРАВИЛО: расходы только из 90%
+            affordability = wallet_service.can_afford_expense(user_id, amount)
+            
+            if not affordability['can_afford']:
+                return {
+                    'success': False,
+                    'error': f"🚫 *Недостаточно средств в Бюджете на жизнь!*\n\n"
+                            f"💼 Доступно: {affordability['available']:,.0f} руб.\n"
+                            f"💸 Нужно: {affordability['needed']:,.0f} руб.\n"
+                            f"📉 Не хватает: {affordability['shortfall']:,.0f} руб."
+                }
+            
+            # Списание ТОЛЬКО из Бюджета на жизнь
+            wallet_service.update_wallet_balance(user_id, 'living_budget', -amount)
+            
+            # Сохраняем запись о расходе
+            self._save_transaction(user_id, 'expense', amount, category, description)
+            
+            new_balance = affordability['available'] - amount
+            
+            return {
+                'success': True,
+                'message': f"💸 *Расход выполнен из Бюджета на жизнь!*\n\n"
+                          f"• Сумма: {amount:,.0f} руб.\n"
+                          f"• Категория: {category}\n"
+                          f"• Остаток: {new_balance:,.0f} руб.",
+                'new_balance': new_balance
+            }
+            
+        except Exception as e:
+            logger.error(f"Expense error for user {user_id}: {e}")
+            return {'success': False, 'error': 'Ошибка при добавлении расхода'}
+    
+    def _save_transaction(self, user_id: int, transaction_type: str, amount: float, 
+                         category: str, description: str):
+        """Внутренний метод для сохранения транзакции в историю"""
         conn = self.conn.get_connection()
-        
-        query = '''
-            SELECT id, user_id, type, amount, category, description, date
-            FROM transactions 
-            WHERE user_id = ?
-        '''
-        params = [user_id]
-        
-        if days:
-            query += " AND date > datetime('now', ?)"
-            params.append(f'-{days} days')
-        elif start_date and end_date:
-            query += " AND date BETWEEN ? AND ?"
-            params.extend([start_date, end_date])
-        
-        query += " ORDER BY date DESC"
-        
         cursor = conn.cursor()
-        cursor.execute(query, params)
-        rows = cursor.fetchall()
-        conn.close()
         
-        transactions = []
-        for row in rows:
-            transactions.append(Transaction(*row))
+        cursor.execute('''
+            INSERT INTO transactions (user_id, type, amount, category, description)
+            VALUES (?, ?, ?, ?, ?)
+        ''', (user_id, transaction_type, amount, category, description))
+        
+        conn.commit()
+        conn.close()
+    
+    def get_transaction_history(self, user_id: int, limit: int = 10) -> list:
+        """Простая история транзакций (только для отображения)"""
+        conn = self.conn.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT type, amount, category, description, date 
+            FROM transactions 
+            WHERE user_id = ? 
+            ORDER BY date DESC 
+            LIMIT ?
+        ''', (user_id, limit))
+        
+        transactions = cursor.fetchall()
+        conn.close()
         
         return transactions
-    
-    def get_transactions_summary(self, user_id: int, days: Optional[int] = None) -> dict:
-        """Возвращает сводку по транзакциям"""
-        transactions = self.get_user_transactions(user_id, days)
-        
-        income = sum(t.amount for t in transactions if t.type == 'income')
-        expense = sum(t.amount for t in transactions if t.type == 'expense')
-        margin = income - expense
-        margin_percent = (margin / income * 100) if income > 0 else 0
-        
-        return {
-            'income': income,
-            'expense': expense,
-            'margin': margin,
-            'margin_percent': margin_percent,
-            'transaction_count': len(transactions)
-        }
-    
-    def get_category_spending(self, user_id: int, category: str, days: int = 30) -> float:
-        """Возвращает сумму расходов по категории за период"""
-        conn = self.conn.get_connection()
-        cursor = conn.cursor()
-        cursor.execute('''
-            SELECT COALESCE(SUM(amount), 0) 
-            FROM transactions 
-            WHERE user_id = ? AND category = ? AND type = 'expense' 
-            AND date > datetime('now', ?)
-        ''', (user_id, category, f'-{days} days'))
-        result = cursor.fetchone()[0]
-        conn.close()
-        return result
 
-# Глобальный экземпляр сервиса
+# Глобальный экземпляр ЧИСТОГО сервиса
 transaction_service = TransactionService()
