@@ -1,8 +1,7 @@
-# finance_bot/services/babylon_service.py
-
+# services/babylon_service.py - ОБНОВЛЕННАЯ ВЕРСИЯ
 import logging
 import random
-from typing import Dict, List
+from typing import Dict
 from database.connection import db_connection
 
 logger = logging.getLogger(__name__)
@@ -35,21 +34,20 @@ class BabylonService:
     def init_user_rules(self, user_id: int) -> bool:
         """Инициализирует прогресс правил для нового пользователя"""
         try:
-            conn = db_connection.get_connection()
-            cursor = conn.cursor()
-            
-            for rule_name in self.rules.keys():
-                cursor.execute('''
-                    INSERT OR IGNORE INTO babylon_rules (user_id, rule_name, progress)
-                    VALUES (?, ?, ?)
-                ''', (user_id, rule_name, 0.0))
-            
-            conn.commit()
-            conn.close()
-            return True
-            
+            with db_connection.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                for rule_name in self.rules.keys():
+                    cursor.execute('''
+                        INSERT OR IGNORE INTO babylon_rules (user_id, rule_name, progress)
+                        VALUES (?, ?, ?)
+                    ''', (user_id, rule_name, 0.0))
+                
+                conn.commit()
+                return True
+                
         except Exception as e:
-            logger.error(f"Error initializing rules for user {user_id}: {e}")
+            logger.error(f"❌ Ошибка инициализации правил для пользователя {user_id}: {e}")
             return False
     
     def get_daily_quote(self) -> str:
@@ -85,46 +83,44 @@ class BabylonService:
     def update_rule_progress(self, user_id: int, rule_name: str, progress: float) -> bool:
         """Обновляет прогресс выполнения правила"""
         try:
-            conn = db_connection.get_connection()
-            cursor = conn.cursor()
-            
-            cursor.execute('''
-                UPDATE babylon_rules 
-                SET progress = ?, last_updated = CURRENT_TIMESTAMP
-                WHERE user_id = ? AND rule_name = ?
-            ''', (progress, user_id, rule_name))
-            
-            conn.commit()
-            conn.close()
-            return True
-            
+            with db_connection.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                cursor.execute('''
+                    UPDATE babylon_rules 
+                    SET progress = ?, last_updated = CURRENT_TIMESTAMP
+                    WHERE user_id = ? AND rule_name = ?
+                ''', (progress, user_id, rule_name))
+                
+                conn.commit()
+                return True
+                
         except Exception as e:
-            logger.error(f"Error updating rule progress: {e}")
+            logger.error(f"❌ Ошибка обновления прогресса правила: {e}")
             return False
     
     def get_user_progress(self, user_id: int) -> Dict:
         """Возвращает прогресс пользователя по всем правилам"""
         try:
-            conn = db_connection.get_connection()
-            cursor = conn.cursor()
-            
-            cursor.execute('''
-                SELECT rule_name, progress FROM babylon_rules 
-                WHERE user_id = ?
-            ''', (user_id,))
-            
-            progress = {row[0]: row[1] for row in cursor.fetchall()}
-            conn.close()
-            
-            # Гарантируем, что все правила присутствуют
-            for rule_name in self.rules.keys():
-                if rule_name not in progress:
-                    progress[rule_name] = 0.0
-            
-            return progress
-            
+            with db_connection.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                cursor.execute('''
+                    SELECT rule_name, progress FROM babylon_rules 
+                    WHERE user_id = ?
+                ''', (user_id,))
+                
+                progress = {row[0]: row[1] for row in cursor.fetchall()}
+                
+                # Гарантируем, что все правила присутствуют
+                for rule_name in self.rules.keys():
+                    if rule_name not in progress:
+                        progress[rule_name] = 0.0
+                
+                return progress
+                
         except Exception as e:
-            logger.error(f"Error getting user progress: {e}")
+            logger.error(f"❌ Ошибка получения прогресса пользователя: {e}")
             return {rule_name: 0.0 for rule_name in self.rules.keys()}
 
 # Глобальный экземпляр сервиса

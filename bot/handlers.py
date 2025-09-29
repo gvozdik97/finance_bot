@@ -139,14 +139,23 @@ async def handle_menu_commands(update: Update, context: ContextTypes.DEFAULT_TYP
     """Обрабатывает команды главного меню"""
     text = update.message.text
     
-    if text == '💳 Добавить доход':
+    if text == '💼 Транзакции':
+        from .transactions_handlers import show_transactions_menu
+        await show_transactions_menu(update, context)
+    elif text == '💰 Бюджеты':
+        from .budget_handlers import show_budgets_menu
+        await show_budgets_menu(update, context)
+    elif text == '⚙️ Настройки':  # ← НОВАЯ КНОПКА
+        from .settings_handlers import show_settings_menu
+        await show_settings_menu(update, context)
+    elif text == '💳 Добавить доход':
         return await add_income(update, context)
     elif text == '💸 Добавить расход':
         return await add_expense(update, context)
     elif text == '🏦 Мои кошельки':
         await show_wallets(update, context)
-    elif text == '📈 Финансовая аналитика':  # ← ИЗМЕНИЛИ НАЗВАНИЕ
-        await show_analytics_menu(update, context)  # ← ПЕРЕНОСИМ СЮДА
+    elif text == '📊 Аналитика':
+        await show_analytics_menu(update, context)
     elif text == '🏛️ Правила Вавилона':
         await show_babylon_rules(update, context)
     elif text == '📜 Долги':
@@ -155,10 +164,9 @@ async def handle_menu_commands(update: Update, context: ContextTypes.DEFAULT_TYP
         await show_help(update, context)
     else:
         # Пробуем быстрый ввод ТОЛЬКО если это не команда меню
-        if not text.startswith(('📜', '➕', '💳', '📋', '📈', '🎯', '📊', '🏠', '🏛️', '🔮', '💰', '📉')):
+        if not text.startswith(('📜', '➕', '💳', '📋', '📈', '🎯', '📊', '🏠', '🏛️', '🔮', '💰', '📉', '💼', '✏️', '⚙️', '🗑️')):
             await quick_input(update, context)
         else:
-            # Если это команда меню аналитики или долгов, но не обработалась - показываем помощь
             await update.message.reply_text(
                 "❌ Команда не распознана. Используйте кнопки меню.",
                 reply_markup=get_main_menu_keyboard()

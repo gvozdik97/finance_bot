@@ -56,3 +56,14 @@ class Debt:
     due_date: Optional[datetime] = None
     status: str = "active"  # 'active', 'paid', 'overdue'
     created_at: Optional[datetime] = None
+
+
+@dataclass
+class UserSettings:
+    """Модель для пользовательских настроек"""
+    id: Optional[int] = None
+    user_id: Optional[int] = None
+    savings_rate: float = 10.0  # Процент накоплений по умолчанию
+    auto_savings: bool = True   # Автоматическое распределение доходов
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None

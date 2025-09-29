@@ -1,9 +1,8 @@
-# services/transaction_service.py - ПОЛНАЯ ПЕРЕПИСЬ
-
+# services/transaction_service.py - ИСПРАВЛЕННАЯ ВЕРСИЯ
 import logging
 from typing import Dict
 from database.connection import db_connection
-from services.wallet_service import wallet_service
+from services.wallet_service import wallet_service  # ← ДОБАВЛЯЕМ ИМПОРТ
 
 logger = logging.getLogger(__name__)
 
@@ -14,15 +13,18 @@ class TransactionService:
     """
     
     def __init__(self):
-        self.conn = db_connection
+        pass  # Убираем self.conn, используем глобальный db_connection
     
-    def add_income(self, user_id: int, amount: float, category: str, description: str = "") -> Dict:
+    def add_income(self, user_id: int, amount: float, category: str, description: str = "", 
+                   use_custom_settings: bool = True) -> Dict:
         """
-        Добавляет доход с АВТОМАТИЧЕСКИМ распределением 10%/90%
+        Добавляет доход с ГИБКИМ распределением
         """
         try:
-            # ВАВИЛОНСКОЕ ПРАВИЛО: распределение 10%/90%
-            distribution = wallet_service.distribute_income(user_id, amount)
+            # Гибкое распределение дохода
+            distribution = wallet_service.distribute_income_flexible(
+                user_id, amount, use_custom_settings
+            )
             
             if not distribution['success']:
                 return distribution
@@ -35,7 +37,8 @@ class TransactionService:
                 'message': distribution['message'],
                 'distribution': {
                     'gold_reserve': distribution['gold_reserve'],
-                    'living_budget': distribution['living_budget']
+                    'living_budget': distribution['living_budget'],
+                    'savings_rate': distribution['savings_rate']
                 }
             }
             
@@ -84,34 +87,31 @@ class TransactionService:
     def _save_transaction(self, user_id: int, transaction_type: str, amount: float, 
                          category: str, description: str):
         """Внутренний метод для сохранения транзакции в историю"""
-        conn = self.conn.get_connection()
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            INSERT INTO transactions (user_id, type, amount, category, description)
-            VALUES (?, ?, ?, ?, ?)
-        ''', (user_id, transaction_type, amount, category, description))
-        
-        conn.commit()
-        conn.close()
+        with db_connection.get_connection() as conn:
+            cursor = conn.cursor()
+            
+            cursor.execute('''
+                INSERT INTO transactions (user_id, type, amount, category, description)
+                VALUES (?, ?, ?, ?, ?)
+            ''', (user_id, transaction_type, amount, category, description))
+            
+            conn.commit()
     
     def get_transaction_history(self, user_id: int, limit: int = 10) -> list:
         """Простая история транзакций (только для отображения)"""
-        conn = self.conn.get_connection()
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            SELECT type, amount, category, description, date 
-            FROM transactions 
-            WHERE user_id = ? 
-            ORDER BY date DESC 
-            LIMIT ?
-        ''', (user_id, limit))
-        
-        transactions = cursor.fetchall()
-        conn.close()
-        
-        return transactions
+        with db_connection.get_connection() as conn:
+            cursor = conn.cursor()
+            
+            cursor.execute('''
+                SELECT type, amount, category, description, date 
+                FROM transactions 
+                WHERE user_id = ? 
+                ORDER BY date DESC 
+                LIMIT ?
+            ''', (user_id, limit))
+            
+            transactions = cursor.fetchall()
+            return transactions
 
 # Глобальный экземпляр ЧИСТОГО сервиса
 transaction_service = TransactionService()

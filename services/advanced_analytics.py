@@ -1,12 +1,8 @@
 # services/advanced_analytics.py - ИСПРАВЛЕННАЯ ВЕРСИЯ
-
 import logging
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 from database.connection import db_connection
-from services.wallet_service import wallet_service
-from services.transaction_service import transaction_service
-from services.debt_service import debt_service
 
 logger = logging.getLogger(__name__)
 
@@ -16,19 +12,35 @@ class AdvancedAnalyticsService:
     Финансовые метрики, KPI и умные рекомендации
     """
     
-    def __init__(self):
-        self.conn = db_connection
-    
     def calculate_financial_health_score(self, user_id: int) -> Dict:
         """
         Рассчитывает общий индекс финансового здоровья (0-100)
         на основе вавилонских принципов
         """
         try:
-            # Базовые метрики (получаем один раз)
-            wallets = wallet_service.get_all_wallets(user_id)
+            # Получаем данные из базы
+            with db_connection.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Получаем текущие балансы кошельков
+                cursor.execute('SELECT wallet_type, balance FROM wallets WHERE user_id = ?', (user_id,))
+                wallets = {row[0]: row[1] for row in cursor.fetchall()}
+                
+                # Получаем транзакции для анализа
+                cursor.execute('''
+                    SELECT type, amount, category, description, date 
+                    FROM transactions 
+                    WHERE user_id = ? 
+                    ORDER BY date DESC 
+                    LIMIT 100
+                ''', (user_id,))
+                transactions = cursor.fetchall()
+            
+            # Используем существующие сервисы для получения дополнительных данных
+            from services.debt_service import debt_service
+            from services.wallet_service import wallet_service
+            
             debts = debt_service.get_active_debts(user_id)
-            transactions = transaction_service.get_transaction_history(user_id, 100)
             
             # 1. Правило 10% (Вес: 30%)
             rule_10_percent = self._calculate_10_percent_score(wallets, transactions)
@@ -54,7 +66,7 @@ class AdvancedAnalyticsService:
                 savings_habit * 0.10
             )
             
-            # Генерируем рекомендации БЕЗ повторного вызова calculate_financial_health_score
+            # Генерируем рекомендации
             recommendations = self._generate_recommendations_direct(
                 rule_10_percent, expense_control, debt_freedom, income_stability, savings_habit
             )
@@ -241,159 +253,6 @@ class AdvancedAnalyticsService:
             recommendations.append("🎉 *Отлично!* Продолжайте в том же духе!")
         
         return recommendations
-    
-    def predict_savings_timeline(self, user_id: int, target_amount: float) -> Dict:
-        """
-        Прогнозирует время достижения цели накоплений
-        на основе текущих привычек
-        """
-        try:
-            transactions = transaction_service.get_transaction_history(user_id, 90)
-            wallets = wallet_service.get_all_wallets(user_id)
-            
-            # Анализ текущих темпов накопления
-            monthly_income = self._calculate_monthly_income(transactions)
-            monthly_savings = monthly_income * 0.10  # Предполагаем правило 10%
-            
-            current_savings = wallets.get('gold_reserve', 0)
-            remaining = max(0, target_amount - current_savings)
-            
-            if monthly_savings <= 0:
-                return {
-                    'achievable': False,
-                    'message': "❌ Недостаточно данных для прогноза. Добавьте данные о доходах."
-                }
-            
-            months_needed = remaining / monthly_savings
-            
-            return {
-                'achievable': True,
-                'current_savings': current_savings,
-                'monthly_savings': monthly_savings,
-                'months_needed': months_needed,
-                'estimated_date': (datetime.now() + timedelta(days=months_needed * 30)).strftime('%d.%m.%Y'),
-                'recommendation': self._get_savings_recommendation(monthly_savings, target_amount)
-            }
-            
-        except Exception as e:
-            logger.error(f"Savings prediction error: {e}")
-            return {'achievable': False, 'message': 'Ошибка расчета'}
-    
-    def _calculate_monthly_income(self, transactions: List) -> float:
-        """Рассчитывает среднемесячный доход"""
-        income_transactions = [t for t in transactions if t[0] == 'income']
-        
-        if not income_transactions:
-            return 0.0
-        
-        # Берем доходы за последние 3 месяца (последние 6 транзакций)
-        recent_income = sum(t[1] for t in income_transactions[:6])
-        monthly_avg = recent_income / 3 if recent_income > 0 else 0
-        
-        return monthly_avg
-    
-    def _get_savings_recommendation(self, monthly_savings: float, target: float) -> str:
-        """Генерирует рекомендацию по накоплениям"""
-        if monthly_savings <= 0:
-            return "💡 Начните с создания источника доходов"
-        
-        time_years = (target / monthly_savings) / 12
-        
-        if time_years > 5:
-            return "🎯 Рассмотрите возможность увеличения доходов или экономии"
-        elif time_years > 2:
-            return "💪 Хороший темп! Продолжайте в том же духе"
-        else:
-            return "🚀 Отличные результаты! Цель близка"
-    
-    def analyze_spending_patterns(self, user_id: int) -> Dict:
-        """
-        Анализирует паттерны расходов и выявляет тенденции
-        """
-        try:
-            conn = self.conn.get_connection()
-            cursor = conn.cursor()
-            
-            # Анализ по категориям за последние 30 дней
-            cursor.execute('''
-                SELECT category, SUM(amount) as total, COUNT(*) as count
-                FROM transactions 
-                WHERE user_id = ? AND type = 'expense' 
-                AND date >= date('now', '-30 days')
-                GROUP BY category
-                ORDER BY total DESC
-            ''', (user_id,))
-            
-            patterns = cursor.fetchall()
-            conn.close()
-            
-            # Если нет данных за 30 дней, пробуем взять все данные
-            if not patterns:
-                conn = self.conn.get_connection()
-                cursor = conn.cursor()
-                cursor.execute('''
-                    SELECT category, SUM(amount) as total, COUNT(*) as count
-                    FROM transactions 
-                    WHERE user_id = ? AND type = 'expense'
-                    GROUP BY category
-                    ORDER BY total DESC
-                ''', (user_id,))
-                patterns = cursor.fetchall()
-                conn.close()
-            
-            analysis = {
-                'total_categories': len(patterns),
-                'top_categories': [],
-                'insights': [],
-                'monthly_total': sum(row[1] for row in patterns)
-            }
-            
-            for category, total, count in patterns[:5]:  # Топ-5 категорий
-                analysis['top_categories'].append({
-                    'category': category,
-                    'amount': total,
-                    'percentage': (total / analysis['monthly_total'] * 100) if analysis['monthly_total'] > 0 else 0,
-                    'frequency': count
-                })
-            
-            # Генерация инсайтов
-            analysis['insights'] = self._generate_spending_insights(analysis)
-            
-            return analysis
-            
-        except Exception as e:
-            logger.error(f"Spending analysis error: {e}")
-            return {
-                'total_categories': 0,
-                'top_categories': [],
-                'insights': ['Недостаточно данных для анализа расходов'],
-                'monthly_total': 0
-            }
-    
-    def _generate_spending_insights(self, analysis: Dict) -> List[str]:
-        """Генерирует инсайты на основе анализа расходов"""
-        insights = []
-        top_categories = analysis.get('top_categories', [])
-        
-        if not top_categories:
-            insights.append("📊 Пока недостаточно данных для анализа расходов")
-            return insights
-        
-        # Анализ распределения
-        if len(top_categories) >= 3:
-            top3_percentage = sum(cat['percentage'] for cat in top_categories[:3])
-            if top3_percentage > 70:
-                insights.append("🎯 Основные расходы сконцентрированы в 3-х категориях")
-        
-        # Поиск потенциальной экономии
-        for category in top_categories:
-            if category['percentage'] > 30:  # Если категория > 30%
-                insights.append(f"💡 {category['category']} - крупная статья расходов")
-        
-        if len(insights) == 0:
-            insights.append("✅ Расходы распределены сбалансированно")
-        
-        return insights
 
 # Глобальный экземпляр сервиса
 advanced_analytics = AdvancedAnalyticsService()
